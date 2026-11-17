@@ -1359,7 +1359,10 @@ impl GlobalContext {
             self.unstable_flags.implicitly_enable_features_if_needed();
         }
 
+        // Shared build directories rely on lock inheritance that is Unix-only; Windows
+        // keeps `-Zohm-shared-registry-cache` as an explicit opt-in.
         if self.unstable_flags.ohm_defaults()
+            && crate::workspace::features::OHM_UNIX_VALIDATED_DEFAULTS
             && self
                 .get_env_os("CARGO_BUILD_BUILD_DIR")
                 .is_some_and(|build_directory| {

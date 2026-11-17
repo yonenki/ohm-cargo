@@ -1318,6 +1318,10 @@ fn parse_gitoxide(
     Ok(Some(out))
 }
 
+/// Ohm defaults whose cache, lock, or file-cloning behavior has only been validated on
+/// Unix hosts. On Windows they stay available through their explicit `-Z` flags.
+pub(crate) const OHM_UNIX_VALIDATED_DEFAULTS: bool = cfg!(not(windows));
+
 impl CliUnstable {
     /// Whether defaults packaged with Ohm are enabled for this invocation.
     pub fn ohm_defaults(&self) -> bool {
@@ -1338,7 +1342,7 @@ impl CliUnstable {
     /// Whether Cargo caches eligible inline doctests.
     pub fn ohm_cached_doctests(&self) -> bool {
         self.ohm_cached_doctests
-            .unwrap_or_else(|| self.ohm_defaults())
+            .unwrap_or_else(|| self.ohm_defaults() && OHM_UNIX_VALIDATED_DEFAULTS)
     }
 
     /// Whether supported test binaries may run while other targets compile.
@@ -1377,7 +1381,7 @@ impl CliUnstable {
     /// Whether mutable packages are prepared for reuse in another worktree.
     pub fn ohm_worktree_seeds(&self) -> bool {
         self.ohm_worktree_seeds
-            .unwrap_or_else(|| self.ohm_defaults())
+            .unwrap_or_else(|| self.ohm_defaults() && OHM_UNIX_VALIDATED_DEFAULTS)
     }
 
     /// Whether library metadata should be emitted separately instead of embedded.
@@ -1395,7 +1399,8 @@ impl CliUnstable {
 
     /// Whether to record the compiler's unused-dependency reports for test scheduling.
     pub(crate) fn collect_relink_cache(&self) -> bool {
-        self.relink_only.unwrap_or_else(|| self.ohm_defaults())
+        self.relink_only
+            .unwrap_or_else(|| self.ohm_defaults() && OHM_UNIX_VALIDATED_DEFAULTS)
     }
 
     /// Parses `-Z` flags from the command line, and returns messages that warn
@@ -1829,4 +1834,33 @@ pub fn cargo_docs_link(path: &str) -> String {
         _ => "",
     };
     format!("https://doc.rust-lang.org/{url_channel}cargo/{path}")
+}
+
+#[cfg(test)]
+mod ohm_platform_defaults_tests {
+    use super::{CliUnstable, OHM_UNIX_VALIDATED_DEFAULTS};
+
+    #[test]
+    fn unvalidated_defaults_follow_the_host_and_remain_explicitly_selectable() {
+        let defaults = CliUnstable {
+            ohm_defaults: Some(true),
+            ..CliUnstable::default()
+        };
+        assert_eq!(defaults.collect_relink_cache(), OHM_UNIX_VALIDATED_DEFAULTS);
+        assert_eq!(defaults.ohm_cached_doctests(), OHM_UNIX_VALIDATED_DEFAULTS);
+        assert_eq!(defaults.ohm_worktree_seeds(), OHM_UNIX_VALIDATED_DEFAULTS);
+        assert!(defaults.ohm_shared_stages());
+        assert!(defaults.headstart());
+
+        let explicit = CliUnstable {
+            ohm_defaults: Some(true),
+            relink_only: Some(true),
+            ohm_cached_doctests: Some(true),
+            ohm_worktree_seeds: Some(true),
+            ..CliUnstable::default()
+        };
+        assert!(explicit.collect_relink_cache());
+        assert!(explicit.ohm_cached_doctests());
+        assert!(explicit.ohm_worktree_seeds());
+    }
 }
