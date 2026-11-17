@@ -357,7 +357,10 @@ fn add_worktree_seed_flags(
 fn unit_checks_relink_inputs(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> bool {
     let bcx = build_runner.bcx;
     let unstable = bcx.gctx.cli_unstable();
-    (unstable.ohm_defaults() || unstable.relink_only())
+    // `dep_info::has_link_only_marker` reads rustc's marker only on Unix. Elsewhere the
+    // marker would stay an ordinary missing input and dirty the unit on every build.
+    cfg!(unix)
+        && (unstable.ohm_defaults() || unstable.relink_only())
         // Shared check/build stages need the same tracked compiler options.
         && (matches!(unit.mode, CompileMode::Build | CompileMode::Test)
             || unit_uses_ohm_shared_stages(build_runner, unit))
