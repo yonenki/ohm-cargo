@@ -169,6 +169,39 @@ pub fn try_canonicalize<P: AsRef<Path>>(path: P) -> std::io::Result<PathBuf> {
     })
 }
 
+/// Whether `path` already names its canonical location `canonical`: no link,
+/// short name, or `.`/`..` component.
+///
+/// Windows reports canonical paths with a verbatim (`\\?\`) prefix that an
+/// ordinary spelling of the same path lacks, so compare without it.
+pub fn spells_canonical(path: &Path, canonical: &Path) -> bool {
+    let path = cargo_util::paths::normalize_path(path);
+    #[cfg(windows)]
+    return without_verbatim_prefix(canonical) == without_verbatim_prefix(&path);
+    #[cfg(not(windows))]
+    return canonical == path;
+}
+
+#[cfg(windows)]
+fn without_verbatim_prefix(path: &Path) -> std::borrow::Cow<'_, Path> {
+    use std::path::{Component, Prefix};
+    let mut components = path.components();
+    let root = match components.next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::VerbatimDisk(drive) => format!("{}:\\", char::from(drive)),
+            Prefix::VerbatimUNC(server, share) => {
+                format!("\\\\{}\\{}\\", server.display(), share.display())
+            }
+            _ => return path.into(),
+        },
+        _ => return path.into(),
+    };
+    // The rest starts at the root directory, which `push` places after the prefix.
+    let mut ordinary = PathBuf::from(root);
+    ordinary.push(components.as_path());
+    ordinary.into()
+}
+
 /// Get the current [`umask`] value.
 ///
 /// [`umask`]: https://man7.org/linux/man-pages/man2/umask.2.html

@@ -550,8 +550,8 @@ pub(in crate::compiler) fn translate_dep_info_with_observer(
     let cwd_from_package =
         if let Some(namespace) = worktree_seed_namespace.filter(|_| allow_package) {
             let cwd = crate::util::try_canonicalize(rustc_cwd)?;
-            let relative = (cwd == paths::normalize_path(rustc_cwd)
-                && pkg_root == paths::normalize_path(original_pkg_root))
+            let relative = (crate::util::spells_canonical(rustc_cwd, &cwd)
+                && crate::util::spells_canonical(original_pkg_root, &pkg_root))
             .then(|| pathdiff::diff_paths(&cwd, &pkg_root))
             .flatten();
             if relative.is_none() {
@@ -1204,7 +1204,7 @@ fn read_dep_info(
             .components()
             .any(|component| component == std::path::Component::ParentDir)
     }) && !crate::util::try_canonicalize(pkg_root)
-        .is_ok_and(|canonical| canonical == paths::normalize_path(pkg_root))
+        .is_ok_and(|canonical| crate::util::spells_canonical(pkg_root, &canonical))
     {
         // A newly symlinked package root can change where a saved ../ prefix
         // resolves. Recompile and let translation reject further seeding.
@@ -1993,6 +1993,53 @@ mod encoded_dep_info {
                 "{other} {checksum:?}"
             );
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parent_directory_input_stays_fresh_under_an_ordinary_windows_root() {
+        let temp = tempfile::tempdir().unwrap();
+        // Canonical Windows paths are verbatim; Cargo finds packages by ordinary paths.
+        let canonical = temp.path().canonicalize().unwrap();
+        let root = PathBuf::from(canonical.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+        let package = root.join("package");
+        let build = root.join("build");
+        std::fs::create_dir_all(package.join("src")).unwrap();
+        std::fs::create_dir(package.join("fixtures")).unwrap();
+        std::fs::create_dir(&build).unwrap();
+        std::fs::write(package.join("fixtures/value"), b"x").unwrap();
+        let raw = build.join("rustc.d");
+        let record = build.join("cargo.d");
+        let input = "src/../fixtures/value";
+        std::fs::write(
+            &raw,
+            format!(
+                "# ohm-raw-checksum-paths-v2\n{}: {input}\n\n{input}:\n# checksum:blake3={} file_len:1 {input}\n",
+                depfile_target(&raw),
+                blake3::hash(b"x")
+            ),
+        )
+        .unwrap();
+        translate_dep_info(
+            &raw,
+            &record,
+            &package,
+            &package,
+            &build,
+            &ProcessBuilder::new("rustc"),
+            true,
+            false,
+            &Arc::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        let info = EncodedDepInfo::parse(&std::fs::read(&record).unwrap()).unwrap();
+        assert!(info.files.iter().any(|(ty, path, _)| {
+            *ty == DepInfoPathType::PackageRootRelative
+                && path == Path::new(r"src\../fixtures/value")
+        }));
+        assert!(parse_dep_info(&package, &build, &record).unwrap().is_some());
     }
 
     #[test]
