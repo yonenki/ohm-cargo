@@ -536,11 +536,17 @@ impl GlobalContext {
     pub fn load_global_rustc(&self, ws: Option<&Workspace<'_>>) -> CargoResult<Rustc> {
         let cache_location =
             ws.map(|ws| ws.build_dir().join(".rustc_info.json").into_path_unlocked());
-        let wrapper = self.maybe_get_tool("rustc_wrapper", &self.build_config()?.rustc_wrapper);
-        let rustc_workspace_wrapper = self.maybe_get_tool(
-            "rustc_workspace_wrapper",
-            &self.build_config()?.rustc_workspace_wrapper,
-        );
+        // An empty wrapper runs rustc directly (`ProcessBuilder::wrapped` skips it). Treat it
+        // as absent so the Ohm paths that keep ordinary compilation under a wrapper agree.
+        let wrapper = self
+            .maybe_get_tool("rustc_wrapper", &self.build_config()?.rustc_wrapper)
+            .filter(|path| !path.as_os_str().is_empty());
+        let rustc_workspace_wrapper = self
+            .maybe_get_tool(
+                "rustc_workspace_wrapper",
+                &self.build_config()?.rustc_workspace_wrapper,
+            )
+            .filter(|path| !path.as_os_str().is_empty());
 
         Rustc::new(
             self.get_tool(Tool::Rustc, &self.build_config()?.rustc),
